@@ -1,6 +1,4 @@
 import struct
-from operator import __truediv__
-
 
 class FileHelper:
 
@@ -126,36 +124,36 @@ class PEHeaderHelper:
 
     cpuType = 0x014C
     numberOfSections = 0x0003
-    timeDateStamp = 0x5FFEFA9C
+    timeDateStamp = 0x00000000
     symbolTableRVA = 0x00000000
     numberOfSymbols = 0x00000000
     sizeOfOptionalHeader = 0x0000
-    characteristics = 0x0307
+    characteristics = 0x0102
 
     optMagic = 0x010b # 0x020b - (64 bit)
     optMajorLinkerVersion = 0x01
     optMinorLinkerVersion = 0x00
     optSizeOfCode = 0x00000000
     optSizeOfInitializedData = 0x00000000
-    optSizeOfUninitializedData = 0x00000000
+    optSizeOfUninitializedData = 0x0000010
     optAddressOfEntryPoint = 0x00000000
     optBaseOfCode = 0x00000000
     optBaseOfData = 0x00000000
     optImageBase = 0x00400000
     optSectionAlignment = 0x00001000
     optFileAlignment = 0x00000200
-    optMajorOperatingSystemVersion = 0x0004
+    optMajorOperatingSystemVersion = 0x0006
     optMinorOperatingSystemVersion = 0x0000
     optMajorImageVersion = 0x0001
     optMinorImageVersion = 0x0000
-    optMajorSubsystemVersion = 0x0004
+    optMajorSubsystemVersion = 0x0006
     optMinorSubsystemVersion = 0x0000
     optWin32VersionValue = 0x00000000
     optSizeOfImage = 0x00000000
     optSizeOfHeaders = 0x00000400
     optCheckSum = 0x00000000
-    optSubsystem = 0x0003
-    optDllCharacteristics = 0x0000
+    optSubsystem = 0x0002
+    optDllCharacteristics = 0x8540
     optSizeOfStackReserve = 0x00200000
     optSizeOfStackCommit = 0x00001000
     optSizeOfHeapReserve = 0x00100000
@@ -320,20 +318,29 @@ class ExeFile:
 
         datadirs.entries.append(DataDirectoryEntry(0x00000000, 0x00000000))
         datadirs.entries.append(DataDirectoryEntry(importVirtualStart, importSectionSize))
+        datadirs.entries.append(DataDirectoryEntry(0x00000000, 0x00000000))
+        datadirs.entries.append(DataDirectoryEntry(0x00000000, 0x00000000))
+        datadirs.entries.append(DataDirectoryEntry(0x00000000, 0x00000000))
+        datadirs.entries.append(DataDirectoryEntry(0x00000000, 0x00000000))
+        datadirs.entries.append(DataDirectoryEntry(0x00000000, 0x00000000))
+        datadirs.entries.append(DataDirectoryEntry(0x00000000, 0x00000000))
+        datadirs.entries.append(DataDirectoryEntry(0x00000000, 0x00000000))
+        datadirs.entries.append(DataDirectoryEntry(0x00000000, 0x00000000))
+        datadirs.entries.append(DataDirectoryEntry(0x00000000, 0x00000000))
+        datadirs.entries.append(DataDirectoryEntry(0x00000000, 0x00000000))
+        datadirs.entries.append(DataDirectoryEntry(0x00000000, 0x00000000))
+        datadirs.entries.append(DataDirectoryEntry(0x00000000, 0x00000000))
+        datadirs.entries.append(DataDirectoryEntry(0x00000000, 0x00000000))
+        datadirs.entries.append(DataDirectoryEntry(0x00000000, 0x00000000))
 
-
-        sectionTable.sections.append(Section(".text", textSectionSize, textVirtualStart, textRoundedSectionSize, textRealStart, 0x60500060))
-        sectionTable.sections.append(Section(".data", dataSectionSize, dataVirtualStart, dataRoundedSectionSize, dataRealStart, 0xC0300040))
-        sectionTable.sections.append(Section(".idata", importSectionSize, importVirtualStart, importRoundedSectionSize, importRealStart, 0xC0300040))
-        sectionTable.sections.append(Section(".bss", 0x1000, 0x4000, 0x00000000, 0x00000000, 0xC0300040))
-        sectionTable.sections.append(Section(".tls", 0x1000, 0x5000, 0x00000000, 0x00000000, 0xC0300040))
-        sectionTable.sections.append(Section(".rdata", 0x1000, 0x6000, 0x00000000, 0x00000000, 0xC0300040))
-        sectionTable.sections.append(Section(".eh_fram", 0x1000, 0x7000, 0x00000000, 0x00000000, 0xC0300040))
+        sectionTable.sections.append(Section(".idata", 4096, importVirtualStart, importRoundedSectionSize, importRealStart, 0x60000020))
+        sectionTable.sections.append(Section(".text", 4096, textVirtualStart, textRoundedSectionSize, textRealStart, 0x60000020))
+        sectionTable.sections.append(Section(".data", 4096, textVirtualStart+4096, dataRoundedSectionSize, dataRealStart, 0x60000040))
 
         peheader.optAddressOfEntryPoint = textVirtualStart
-        peheader.optNumberOfRvaAndSizes = len(datadirs.entries)
+        peheader.optNumberOfRvaAndSizes = 16
         peheader.numberOfSections = len(sectionTable.sections)
-        peheader.sizeOfOptionalHeader = 96 + peheader.optNumberOfRvaAndSizes * 4 * 2;
+        peheader.sizeOfOptionalHeader = 96 + peheader.optNumberOfRvaAndSizes * 4 * 2
         peheader.optSizeOfCode = textRoundedSectionSize
         peheader.optSizeOfInitializedData = dataRoundedSectionSize + importRoundedSectionSize
         peheader.optSizeOfHeaders = this.reserved
@@ -379,45 +386,6 @@ class ExeFile:
         tempBuffer.Dump(exe)
         exe.close()
 
-bitmap = open('bitmap.bmp', 'rb')
-
-bmpMagic = struct.unpack("<H",  bitmap.read(2))[0]
-bmpSize = struct.unpack("<L", bitmap.read(4))[0]
-bmpReserved = struct.unpack("<L", bitmap.read(4))[0]
-bmpPixelArrayOffset = struct.unpack("<L", bitmap.read(4))[0]
-bmpHeaderSize = struct.unpack("<L", bitmap.read(4))[0]
-bmpWidth = struct.unpack("<L", bitmap.read(4))[0]
-bmpHeight = struct.unpack("<L", bitmap.read(4))[0]
-bmpColorPlanesN = struct.unpack("<H", bitmap.read(2))[0]
-bmpBitsPerPixel = struct.unpack("<H", bitmap.read(2))[0]
-assert(bmpBitsPerPixel == 24), f"Error: bmpBitsPerPixel not 24 ({bmpBitsPerPixel})"
-bmpCompression = struct.unpack("<L", bitmap.read(4))[0]
-assert(bmpCompression == 0), "Error: bitmap file not RGB"
-bmpImageSize = struct.unpack("<L", bitmap.read(4))[0]
-bmpHorizontalResolution = struct.unpack("<L", bitmap.read(4))[0]
-bmpVerticalResolution = struct.unpack("<L", bitmap.read(4))[0]
-bmpNumberOfColors = struct.unpack("<L", bitmap.read(4))[0]
-bmpNumberOfImportantColors = struct.unpack("<L", bitmap.read(4))[0]
-
-bitmap.seek(bmpPixelArrayOffset, 0)
-
-# oh python, why can't you be normal?!
-bytesPerRow = (((bmpWidth * 3) - 1) // 4 + 1) * 4
-
-pixelData = bitmap.read(bmpHeight * bytesPerRow * 3)
-
-for j in range(0, bmpHeight):
-    for i in range(0, bmpWidth):
-        pixel = struct.unpack_from("<BBB", pixelData, bytesPerRow * (bmpHeight - 1 - j) + i * 3)
-
-        #if pixel == (0,255,0):
-        #    print('#', end='')
-        #else:
-        #    print(' ', end='')
-    #print('')
-
-bitmap.close()
-
 file = ExeFile("a.exe")
 
 imports = PseudoFile()
@@ -454,11 +422,15 @@ helper.WriteInt16u(0x0000)
 # 3026:
 helper.WriteData("KERNEL32.DLL".encode("ASCII"))
 helper.WriteByte(0x00)
+helper.WriteByte(0x00)
 
 data = PseudoFile()
 helper2 = FileHelper(data)
+helper2.WriteInt32u(0x00)
+helper2.WriteInt32u(0x00)
+helper2.WriteInt32u(0x00)
+helper2.WriteInt32u(0x00)
 
-helper2.WriteByte(0x00)
 
 code = PseudoFile()
 helper3 = FileHelper(code)

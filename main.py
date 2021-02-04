@@ -153,7 +153,7 @@ class PEHeaderHelper:
     optSizeOfHeaders = 0x00000400
     optCheckSum = 0x00000000
     optSubsystem = 0x0002
-    optDllCharacteristics = 0x8540
+    optDllCharacteristics = 0x8500
     optSizeOfStackReserve = 0x00200000
     optSizeOfStackCommit = 0x00001000
     optSizeOfHeapReserve = 0x00100000
@@ -279,7 +279,7 @@ class ExeFile:
     def __init__(this, filename):
         this.filename = filename
 
-    def GenerateExecutableFile(this, code, data, imports):
+    def GenerateExecutableFile(this, code, data, imports, importTableStart, importTableSize):
         textSectionSize = len(code)
         dataSectionSize = len(data)
         importSectionSize = len(imports)
@@ -317,7 +317,7 @@ class ExeFile:
         sectionTable = SectionTableHelper()
 
         datadirs.entries.append(DataDirectoryEntry(0x00000000, 0x00000000))
-        datadirs.entries.append(DataDirectoryEntry(importVirtualStart, importSectionSize))
+        datadirs.entries.append(DataDirectoryEntry(importTableStart, importTableSize))
         datadirs.entries.append(DataDirectoryEntry(0x00000000, 0x00000000))
         datadirs.entries.append(DataDirectoryEntry(0x00000000, 0x00000000))
         datadirs.entries.append(DataDirectoryEntry(0x00000000, 0x00000000))
@@ -386,43 +386,108 @@ class ExeFile:
         tempBuffer.Dump(exe)
         exe.close()
 
+undefiniedReferences = []
+
+def GenerateInstructionsExit():
+    return [0xEB, 0xFE]
+
+def GenerateInstructionsPush(value):
+    return [0x6A, value]
+
+def GenerateInstructionsPrint():
+    return []
+
+def GenerateInstructionsFromColor(pixel):
+    if pixel[1] == 160:
+        return GenerateInstructionsPush(pixel[1])
+    if pixel.__eq__((0,64,0)):
+        return GenerateInstructionsPrint()
+    return GenerateInstructionsExit()
+
+from bitmap import *
+
+pixelData = getPixels("bitmap.bmp")
+print(pixelData[0][0])
+
+offsets = [[False for i in range(len(pixelData[0]))] for j in range(len(pixelData))]
+
+
 file = ExeFile("a.exe")
 
 imports = PseudoFile()
 helper = FileHelper(imports)
 
-helper.WriteInt32u(0x00001000+40)
-helper.WriteInt32u(0x00000000)
-helper.WriteInt32u(0x00000000)
-helper.WriteInt32u(0x00001026+40)
-helper.WriteInt32u(0x0000100C+40)
-helper.WriteInt32u(0x00000000)
-helper.WriteInt32u(0x00000000)
-helper.WriteInt32u(0x00000000)
-helper.WriteInt32u(0x00000000)
-helper.WriteInt32u(0x00000000)
+importsBase = 0x00001000
 
-
-# 3000:
-helper.WriteInt32u(0x00001016+40) # AllocConsole, 13 + 2 bytes + 1 pad byte
-# 3004:
-helper.WriteInt32u(0x00000000)
-# 3008:
-helper.WriteInt32u(0x00001026+40) # KERNEL32.DLL, 12
-# 300C:
+allocConsoleStringRVA = imports.count() + importsBase
 helper.WriteInt16u(0x0000)
-helper.WriteInt32u(0x00001016+40)
-# 2012
-helper.WriteInt32u(0x00000000)
-# 3016: (hint)
-helper.WriteInt16s(0x0000)
-# 3018:
 helper.WriteData("AllocConsole".encode("ASCII"))
 helper.WriteInt16u(0x0000)
-# 3026:
-helper.WriteData("KERNEL32.DLL".encode("ASCII"))
+
+nnxPrintStringRVA = imports.count() + importsBase
+helper.WriteInt16u(0x0000)
+helper.WriteData("NNXPrint".encode("ASCII"))
+helper.WriteInt16u(0x0000)
+
+nnxInitStringRVA = imports.count() + importsBase
+helper.WriteInt16u(0x0000)
+helper.WriteData("NNXInit".encode("ASCII"))
+helper.WriteByte(0x00)
+
+kernel32StringRVA = imports.count() + importsBase
+helper.WriteData("KERNEL32.dll".encode("ASCII"))
 helper.WriteByte(0x00)
 helper.WriteByte(0x00)
+
+nnxlxdmmStringRVA = imports.count() + importsBase
+helper.WriteData("NNXLXDMM.dll".encode("ASCII"))
+helper.WriteInt16u(0x0000)
+
+
+kernel32ThunkChainRVA = imports.count() + importsBase
+helper.WriteInt32u(allocConsoleStringRVA) # AllocConsole, 13 + 2 bytes + 1 pad byte
+helper.WriteInt32u(0x00000000)
+
+kernel32OriginalThunkChainRVA = imports.count() + importsBase
+helper.WriteInt32u(allocConsoleStringRVA)
+helper.WriteInt32s(0x00000000)
+
+nnxlxdmmThunkChainRVA = imports.count() + importsBase
+helper.WriteInt32u(nnxPrintStringRVA)
+helper.WriteInt32u(nnxInitStringRVA)
+helper.WriteInt32u(0x00000000)
+
+nnxlxdmmOriginalThunkChainRVA = imports.count() + importsBase
+helper.WriteInt32u(nnxPrintStringRVA)
+helper.WriteInt32u(nnxInitStringRVA)
+helper.WriteInt32u(0x00000000)
+
+importTable = imports.count() + importsBase
+
+helper.WriteInt32u(kernel32OriginalThunkChainRVA)
+helper.WriteInt32u(0x00000000)
+helper.WriteInt32u(0x00000000)
+helper.WriteInt32u(kernel32StringRVA)
+helper.WriteInt32u(kernel32ThunkChainRVA)
+
+helper.WriteInt32u(nnxlxdmmOriginalThunkChainRVA)
+helper.WriteInt32u(0x00000000)
+helper.WriteInt32u(0x00000000)
+helper.WriteInt32u(nnxlxdmmStringRVA)
+helper.WriteInt32u(nnxlxdmmThunkChainRVA)
+
+importTableEnd = imports.count() + importsBase
+
+helper.WriteInt32u(0x00000000)
+helper.WriteInt32u(0x00000000)
+helper.WriteInt32u(0x00000000)
+helper.WriteInt32u(0x00000000)
+helper.WriteInt32u(0x00000000)
+
+currentImportOffset = imports.count()
+helper.WriteByte(0xFF)
+helper.WriteByte(0x25)
+helper.WriteInt32u(nnxlxdmmThunkChainRVA + 0x400000)
 
 data = PseudoFile()
 helper2 = FileHelper(data)
@@ -435,13 +500,34 @@ helper2.WriteInt32u(0x00)
 code = PseudoFile()
 helper3 = FileHelper(code)
 
+helper3.WriteByte(0x68)
+helper3.WriteInt32s(0x00402000 + 11)
+helper3.WriteByte(0xFF)
+helper3.WriteByte(0x25)
+helper3.WriteInt32s(kernel32ThunkChainRVA + 0x00400000)
+
+chunkStart = code.count()
+helper3.WriteByte(0x68)
+helper3.WriteInt32s(0x00402000 + chunkStart + 11)
+helper3.WriteByte(0xFF)
+helper3.WriteByte(0x25)
+helper3.WriteInt32s(nnxlxdmmThunkChainRVA + 4 + 0x400000)
+
+helper3.WriteByte(0x6A)
+helper3.WriteByte(0x6E)
+helper3.WriteByte(0x6A)
+helper3.WriteByte(0x01)
+chunkStart = code.count()
+helper3.WriteByte(0x68)
+helper3.WriteInt32s(0x00402000 + chunkStart + 11)
+helper3.WriteByte(0xFF)
+helper3.WriteByte(0x25)
+helper3.WriteInt32s(nnxlxdmmThunkChainRVA + 0x400000)
+
 helper3.WriteByte(0xEB)
 helper3.WriteByte(0xFE)
 
-helper3.WriteByte(0xBF)
-helper3.WriteInt32s(0x0000100C+40)
-helper3.WriteByte(0xFF)
-helper3.WriteByte(0x17)
 
 
-file.GenerateExecutableFile(code.data, data.data, imports.data)
+
+file.GenerateExecutableFile(code.data, data.data, imports.data, importTable, importTableEnd - importTable - 1)

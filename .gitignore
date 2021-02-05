@@ -1,0 +1,8 @@
+*.exe
+*.dll
+*.lib
+*.obj
+*.o
+venv/*
+__pychache__/*
+*.exp

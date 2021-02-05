@@ -386,31 +386,35 @@ class ExeFile:
         tempBuffer.Dump(exe)
         exe.close()
 
-undefiniedReferences = []
+UnresolvedReference = []
 
 def GenerateInstructionsExit():
-    return [0xEB, 0xFE]
+    return ["OFFSET",0]
 
 def GenerateInstructionsPush(value):
-    return [0x6A, value]
+    return [0x68, value&0xFF, (value&0xFF00)>>8, (value&0xFF0000)>>16, (value&0xFF000000)>>24]
 
-def GenerateInstructionsPrint():
-    return []
+def GenerateInstructionsCallNamed(name):
+    return ["CALL",name]
 
 def GenerateInstructionsFromColor(pixel):
     if pixel[1] == 160:
         return GenerateInstructionsPush(pixel[1])
-    if pixel.__eq__((0,64,0)):
-        return GenerateInstructionsPrint()
+    if pixel[0] == 0 and pixel[1] == 64:
+        return GenerateInstructionsCallNamed("NNXImport")
     return GenerateInstructionsExit()
+
+def GenerateCodeFromColor(pixel):
+    direction = pixel[2] / 32
+    result = GenerateInstructionsFromColor(pixel)
+    result.append()
 
 from bitmap import *
 
 pixelData = getPixels("bitmap.bmp")
-print(pixelData[0][0])
 
 offsets = [[False for i in range(len(pixelData[0]))] for j in range(len(pixelData))]
-
+offsets[0][0] = 0
 
 file = ExeFile("a.exe")
 
@@ -491,24 +495,93 @@ helper.WriteInt32u(nnxlxdmmThunkChainRVA + 0x400000)
 
 data = PseudoFile()
 helper2 = FileHelper(data)
-helper2.WriteInt32u(0x00)
-helper2.WriteInt32u(0x00)
-helper2.WriteInt32u(0x00)
-helper2.WriteInt32u(0x00)
 
+# store offset table
 
 code = PseudoFile()
 helper3 = FileHelper(code)
 
-helper3.WriteByte(0x68)
-helper3.WriteInt32s(0x00402000 + 11)
+helper3.WriteByte(0xEB)
+helper3.WriteByte(0xFE)
+
+getEsp = code.count()
+helper3.WriteInt32u(0xC324048B)
+
+x = pixelData[0][0][0]
+y = pixelData[0][0][1]
+
+print(pixelData[y][x])
+
+positionQueue = []
+positionQueue.append((y,x))
+
+references = []
+
+def GenerateCode(q, h, f):
+    while len(q) > 0:
+        currentPos = q.pop(0)
+        x = currentPos[1]
+        y = currentPos[0]
+        offsets[y][x] = f.count()
+        pixel = pixelData[y][x]
+
+        regular = pixel[0]
+        guidance = pixel[1]
+        bend = pixel[2]
+
+        destination = None
+
+        # special function
+        if guidance == 32:
+            if regular == 32:
+                destination = (0,0)
+            if regular == 0:
+                h.WriteByte(0xE8)
+                h.WriteInt32s(getEsp - offsets[y][x] - 5)
+                h.WriteInt16u(0x15FF)
+                references.append([f, f.count(), 4, "IMPORT", 0])
+                h.WriteInt32u(0xDEADBEEF)
+        if guidance == 160:
+            h.WriteByte(0x68)
+            h.WriteInt32u(regular)
+
+        bend = bend // 32
+
+        if destination == None:
+            if bend == 0:
+                destination = (y + 1, x)
+            if bend == 1:
+                destination = (y + 1, x - 1)
+            if bend == 2:
+                destination = (y, x - 1)
+            if bend == 3:
+                destination = (y - 1, x - 1)
+            if bend == 4:
+                destination = (y - 1, x)
+            if bend == 5:
+                destination = (y - 1, x + 1)
+            if bend == 6:
+                destination = (y, x + 1)
+            if bend == 7:
+                destination = (y + 1, x + 1)
+            if offsets[destination[0]][destination[1]] == False:
+                q.append(destination)
+        # generate jump to destination
+        print("Generating for",regular,guidance,bend)
+        h.WriteInt16u(0x25FF)
+        references.append([f, f.count(), 4, "OFFSETS", destination[0], destination[1]])
+        h.WriteInt32u(0xDEADBEEF)
+GenerateCode(positionQueue, helper3, code)
+
+helper3.WriteByte(0xE8)
+helper3.WriteInt32s(11)
 helper3.WriteByte(0xFF)
 helper3.WriteByte(0x25)
 helper3.WriteInt32s(kernel32ThunkChainRVA + 0x00400000)
 
 chunkStart = code.count()
-helper3.WriteByte(0x68)
-helper3.WriteInt32s(0x00402000 + chunkStart + 11)
+helper3.WriteByte(0xE8)
+helper3.WriteInt32s(11)
 helper3.WriteByte(0xFF)
 helper3.WriteByte(0x25)
 helper3.WriteInt32s(nnxlxdmmThunkChainRVA + 4 + 0x400000)
@@ -516,10 +589,10 @@ helper3.WriteInt32s(nnxlxdmmThunkChainRVA + 4 + 0x400000)
 helper3.WriteByte(0x6A)
 helper3.WriteByte(0x6E)
 helper3.WriteByte(0x6A)
-helper3.WriteByte(0x01)
+helper3.WriteInt32s(0x01)
 chunkStart = code.count()
-helper3.WriteByte(0x68)
-helper3.WriteInt32s(0x00402000 + chunkStart + 11)
+helper3.WriteByte(0xE8)
+helper3.WriteInt32s(11)
 helper3.WriteByte(0xFF)
 helper3.WriteByte(0x25)
 helper3.WriteInt32s(nnxlxdmmThunkChainRVA + 0x400000)
@@ -528,6 +601,21 @@ helper3.WriteByte(0xEB)
 helper3.WriteByte(0xFE)
 
 
+# ResolveReferences(code, data, imports)
+for reference in references:
+    fixFile = reference[0]
+    length = reference[2]
+    type = reference[3]
 
+    if type.__eq__("OFFSETS"):
+        replace = (reference[4] * len(pixelData[0]) + reference[5]) * 4
+        print("GOTO",reference[4],reference[5],len(pixelData[0]),replace)
+        replaceOffset = reference[1]
+        mask = 0xFF
+        for i in range(0,length):
+            fixFile.data[replaceOffset + i] = (replace & mask) >> (i*8)
+            mask = mask << 8
+    else:
+        print(type)
 
 file.GenerateExecutableFile(code.data, data.data, imports.data, importTable, importTableEnd - importTable - 1)

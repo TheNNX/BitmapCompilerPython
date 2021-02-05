@@ -1,23 +1,29 @@
 [bits 32]
 [section .text]
-[global _DllMain]
-[global _NNXInit]
+[global _DllMain@12]
+[global _NNXInit@0]
 [global _NNXPrint]
+[global _GetStack@0]
+[global _Test@0]
+
+[export _DllMain@12]
+[export _NNXInit@0]
+[export _NNXPrint@4]
+[export _GetStack@0]
+[export _Test@0]
 
 [extern _DebugBreak@0]
 [extern _WriteConsoleA@20]
 [extern _GetStdHandle@4]
-[export _DllMain]
-[export _NNXInit]
-[export _NNXPrint]
 [extern _AllocConsole@0]
 
 
-_DllMain:
+
+_DllMain@12:
 	mov eax, 1
 	ret 12
 	
-_NNXInit:
+_NNXInit@0:
 	push dword -11
 	call _GetStdHandle@4
 	
@@ -30,20 +36,46 @@ _NNXInit:
 	
 	ret 
 	
-; [BP + 9] = char1
-; [BP + 8] = len
-; [BP + 4] = return
-_NNXPrint:
-	jmp $
-	mov eax, [esp]
+_GetStack@0:
+	mov eax, esp
+	add eax, 4
+	ret
 	
-	mov [returnAddress], eax
-	mov [tempEbp], ebp
-	
+_Test@0:
+	push ebp
 	mov ebp, esp
+	
+	push 0x61616161
+	push byte 0x0
+	call _NNXPrint
+	
+	pop ebp
+	ret
+	
+; [EBP + 9] = char1
+; [EBP + 8] = len
+; [EBP + 4] = return
+_NNXPrint:
+	push ebp
+	mov ebp, esp
+	
+	mov eax, esp
+	add al, [ebp + 8]
+	jnc .DontInc
+	add eax, 0x100
+.DontInc:
+	add eax, 9
+	push dword eax
+	
+	mov eax, [ebp + 4]
+	push dword eax
 
-.Loop:	
-	mov al, [bp + 9]
+.Loop:
+	
+	cmp byte [ebp + 8], 0
+		jna .End
+	
+	mov al, [ebp + 9]
 	mov [tempBuffer], al
 	
 	push dword -11
@@ -56,30 +88,21 @@ _NNXPrint:
 	push dword eax
 	call _WriteConsoleA@20
 	
-	mov al, [tempBuffer]
-	test al, al
-		jz .End
-	
-	mov al, [counter]
-	cmp al, [max]
-		jge .End
-	
-	inc al
-	mov [counter], al
+	dec byte [ebp + 8]
 	
 	jmp .Loop
 	
-.End:
-	jmp $
-	and eax, 0xFF
-	add esp, eax
-	mov ebp, [tempEbp]
-	mov eax, [returnAddress]
-	push eax
-	ret
+.End:	
+
+	pop eax
+	pop ebp
+	pop esp
+	xchg ebp, esp
+	jmp eax
+	
 	
 [section .data]
-tempBuffer: dw 0x0000
+tempBuffer: db 'abc'
 written: dd 0x00000000
 returnAddress: dd 0x00000000
 tempEbp: dd 0x00000000

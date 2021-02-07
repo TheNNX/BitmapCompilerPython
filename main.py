@@ -1,4 +1,32 @@
-import struct
+import sys
+
+importDictionary = {}
+trueCodeStart = 0
+
+index = 1
+inputFile = "bitmap.bmp"
+outputFile = "a.exe"
+fileBase = 0x400000
+
+if len(sys.argv) > 1:
+    print("Got command line parameters")
+    while index < len(sys.argv):
+        if sys.argv[index].startswith("-"):
+            subparam = sys.argv[index].removeprefix(__prefix="-")
+            if subparam == "o" or subparam == "output":
+                index = index + 1
+                outputFile = sys.argv[index]
+            if subparam == "b" or subparam == "base":
+                index = index + 1
+                baseString = sys.argv[index]
+                fileBase = int(baseString, 16)
+        elif inputFile is None:
+            inputFile = sys.argv[index]
+            if outputFile is None:
+                outputFile = inputFile.removesuffix(".bmp")
+        else:
+            print("Unknown parameter "+sys.argv[index]+", ignoring")
+        index = index + 1
 
 class FileHelper:
 
@@ -279,7 +307,7 @@ class ExeFile:
     def __init__(this, filename):
         this.filename = filename
 
-    def GenerateExecutableFile(this, code, data, imports, importTableStart, importTableSize):
+    def GenerateExecutableFile(this, code, data, imports, importTableStart, importTableSize, references):
         textSectionSize = len(code)
         dataSectionSize = len(data)
         importSectionSize = len(imports)
@@ -288,10 +316,14 @@ class ExeFile:
         dataRoundedSectionSize = ((dataSectionSize - 1) // this.fileAlign + 1) * this.fileAlign
         importRoundedSectionSize = ((importSectionSize - 1) // this.fileAlign + 1) * this.fileAlign
 
+        importVirtualSize = ((importSectionSize - 1) // this.virtualAlign + 1) * this.virtualAlign
+        textVirtualSize = ((textSectionSize - 1) // this.virtualAlign + 1) * this.virtualAlign
+        dataVirtualSize = ((dataSectionSize - 1) // this.virtualAlign + 1) * this.virtualAlign
+
         importVirtualStart = 0x1000
-        textVirtualStart = importVirtualStart + ((importSectionSize - 1) // this.virtualAlign + 1) * this.virtualAlign
-        dataVirtualStart = textVirtualStart + ((textSectionSize - 1) // this.virtualAlign + 1) * this.virtualAlign
-        nextVirtualStart = dataVirtualStart + ((dataSectionSize - 1) // this.virtualAlign + 1) * this.virtualAlign
+        textVirtualStart = importVirtualStart + importVirtualSize
+        dataVirtualStart = textVirtualStart + textVirtualSize
+        nextVirtualStart = dataVirtualStart + dataVirtualSize
 
 
         # TODO: solve relocations
@@ -300,6 +332,32 @@ class ExeFile:
         textRealStart = importRealStart + importRoundedSectionSize
         dataRealStart = textRealStart + textRoundedSectionSize
         nextVirtualEnd = dataRealStart + dataRoundedSectionSize
+
+        for reference in references:
+            fixFile = reference[0]
+            length = reference[2]
+            type = reference[3]
+
+            if type.__eq__("OFFSETS"):
+                replace = (reference[4] * len(pixelData[0]) + reference[5]) * 4 + fileBase + dataVirtualStart
+                print("GOTO", reference[4], reference[5], len(pixelData[0]), replace, replace - (dataVirtualStart + fileBase))
+            elif type.__eq__("IMPORT"):
+                builtInFunctionID = reference[4]
+                replace = importDictionary[builtInFunctionID]
+                replace = replace + fileBase + importVirtualStart
+            elif type.__eq__("CODE"):
+                offset = reference[4]
+                replace = offset + textVirtualStart + fileBase
+                if offset != 17:
+                    print("Replacing with CODE +",offset)
+            else:
+                print(type)
+
+            replaceOffset = reference[1]
+            mask = 0xFF
+            for i in range(0, length):
+                fixFile.data[replaceOffset + i] = (replace & mask) >> (i * 8)
+                mask = mask << 8
 
         exe = open(this.filename, 'wb+')
         tempBuffer = PseudoFile()
@@ -333,9 +391,9 @@ class ExeFile:
         datadirs.entries.append(DataDirectoryEntry(0x00000000, 0x00000000))
         datadirs.entries.append(DataDirectoryEntry(0x00000000, 0x00000000))
 
-        sectionTable.sections.append(Section(".idata", 4096, importVirtualStart, importRoundedSectionSize, importRealStart, 0x60000020))
-        sectionTable.sections.append(Section(".text", 4096, textVirtualStart, textRoundedSectionSize, textRealStart, 0x60000020))
-        sectionTable.sections.append(Section(".data", 4096, textVirtualStart+4096, dataRoundedSectionSize, dataRealStart, 0x60000040))
+        sectionTable.sections.append(Section(".idata", importVirtualSize, importVirtualStart, importRoundedSectionSize, importRealStart, 0x60000020))
+        sectionTable.sections.append(Section(".text", textVirtualSize, textVirtualStart, textRoundedSectionSize, textRealStart, 0x60000020))
+        sectionTable.sections.append(Section(".data", dataVirtualSize, dataVirtualStart, dataRoundedSectionSize, dataRealStart, 0x60000040))
 
         peheader.optAddressOfEntryPoint = textVirtualStart
         peheader.optNumberOfRvaAndSizes = 16
@@ -388,27 +446,6 @@ class ExeFile:
 
 UnresolvedReference = []
 
-def GenerateInstructionsExit():
-    return ["OFFSET",0]
-
-def GenerateInstructionsPush(value):
-    return [0x68, value&0xFF, (value&0xFF00)>>8, (value&0xFF0000)>>16, (value&0xFF000000)>>24]
-
-def GenerateInstructionsCallNamed(name):
-    return ["CALL",name]
-
-def GenerateInstructionsFromColor(pixel):
-    if pixel[1] == 160:
-        return GenerateInstructionsPush(pixel[1])
-    if pixel[0] == 0 and pixel[1] == 64:
-        return GenerateInstructionsCallNamed("NNXImport")
-    return GenerateInstructionsExit()
-
-def GenerateCodeFromColor(pixel):
-    direction = pixel[2] / 32
-    result = GenerateInstructionsFromColor(pixel)
-    result.append()
-
 from bitmap import *
 
 pixelData = getPixels("bitmap.bmp")
@@ -418,10 +455,21 @@ offsets[0][0] = 0
 
 file = ExeFile("a.exe")
 
+x = pixelData[0][0][0]
+y = pixelData[0][0][1]
+
+print(pixelData[y][x])
+
+positionQueue = []
+positionQueue.append((y,x))
+
+references = []
+
 imports = PseudoFile()
 helper = FileHelper(imports)
 
 importsBase = 0x00001000
+
 
 allocConsoleStringRVA = imports.count() + importsBase
 helper.WriteInt16u(0x0000)
@@ -435,7 +483,12 @@ helper.WriteInt16u(0x0000)
 
 nnxInitStringRVA = imports.count() + importsBase
 helper.WriteInt16u(0x0000)
-helper.WriteData("NNXInit".encode("ASCII"))
+helper.WriteData("_NNXInit@0".encode("ASCII"))
+helper.WriteByte(0x00)
+
+nnxConditionalStringRVA = imports.count() + importsBase
+helper.WriteInt16u(0x0000)
+helper.WriteData("_NNXConditional@12".encode("ASCII"))
 helper.WriteByte(0x00)
 
 kernel32StringRVA = imports.count() + importsBase
@@ -447,7 +500,6 @@ nnxlxdmmStringRVA = imports.count() + importsBase
 helper.WriteData("NNXLXDMM.dll".encode("ASCII"))
 helper.WriteInt16u(0x0000)
 
-
 kernel32ThunkChainRVA = imports.count() + importsBase
 helper.WriteInt32u(allocConsoleStringRVA) # AllocConsole, 13 + 2 bytes + 1 pad byte
 helper.WriteInt32u(0x00000000)
@@ -457,8 +509,12 @@ helper.WriteInt32u(allocConsoleStringRVA)
 helper.WriteInt32s(0x00000000)
 
 nnxlxdmmThunkChainRVA = imports.count() + importsBase
+importDictionary["NNXPrint"] = imports.count()
 helper.WriteInt32u(nnxPrintStringRVA)
+importDictionary["NNXInit"] = imports.count()
 helper.WriteInt32u(nnxInitStringRVA)
+importDictionary["NNXConditional"] = imports.count()
+helper.WriteInt32u(nnxConditionalStringRVA)
 helper.WriteInt32u(0x00000000)
 
 nnxlxdmmOriginalThunkChainRVA = imports.count() + importsBase
@@ -491,15 +547,23 @@ helper.WriteInt32u(0x00000000)
 currentImportOffset = imports.count()
 helper.WriteByte(0xFF)
 helper.WriteByte(0x25)
-helper.WriteInt32u(nnxlxdmmThunkChainRVA + 0x400000)
-
-data = PseudoFile()
-helper2 = FileHelper(data)
-
-# store offset table
+helper.WriteInt32u(nnxlxdmmThunkChainRVA + fileBase)
 
 code = PseudoFile()
 helper3 = FileHelper(code)
+
+helper3.WriteByte(0x68)
+references.append([code, code.count(), 4, "CODE", 0xB])
+helper3.WriteInt32u(0xDEADBEEF)
+helper3.WriteByte(0xFF)
+helper3.WriteByte(0x25)
+helper3.WriteInt32u(kernel32ThunkChainRVA + fileBase)
+helper3.WriteByte(0xFF)
+helper3.WriteByte(0x25)
+references.append([code, code.count(), 4, "OFFSETS", pixelData[0][0][1], pixelData[0][0][0]])
+helper3.WriteInt32u(0xDEADBEEF)
+
+trueCodeStart = code.count()
 
 helper3.WriteByte(0xEB)
 helper3.WriteByte(0xFE)
@@ -507,15 +571,24 @@ helper3.WriteByte(0xFE)
 getEsp = code.count()
 helper3.WriteInt32u(0xC324048B)
 
-x = pixelData[0][0][0]
-y = pixelData[0][0][1]
-
-print(pixelData[y][x])
-
-positionQueue = []
-positionQueue.append((y,x))
-
-references = []
+def CalculateDestination(x, y, bend):
+    if bend == 0:
+        destination = (y + 1, x)
+    if bend == 1:
+        destination = (y + 1, x - 1)
+    if bend == 2:
+        destination = (y, x - 1)
+    if bend == 3:
+        destination = (y - 1, x - 1)
+    if bend == 4:
+        destination = (y - 1, x)
+    if bend == 5:
+        destination = (y - 1, x + 1)
+    if bend == 6:
+        destination = (y, x + 1)
+    if bend == 7:
+        destination = (y + 1, x + 1)
+    return destination
 
 def GenerateCode(q, h, f):
     while len(q) > 0:
@@ -539,8 +612,24 @@ def GenerateCode(q, h, f):
                 h.WriteByte(0xE8)
                 h.WriteInt32s(getEsp - offsets[y][x] - 5)
                 h.WriteInt16u(0x15FF)
-                references.append([f, f.count(), 4, "IMPORT", 0])
+                references.append([f, f.count(), 4, "IMPORT", "NNXPrint"])
                 h.WriteInt32u(0xDEADBEEF)
+        # conditional
+        if guidance == 64:
+            h.WriteByte(0xE8)
+            h.WriteInt32s(getEsp - offsets[y][x] - 5)
+            h.WriteInt16u(0x15FF)
+            references.append([f, f.count(), 4, "IMPORT", "NNXConditional"])
+            h.WriteInt32u(0xDEADBEEF)
+            inverseDestination = CalculateDestination(x, y, (bend + 4) % 8)
+            h.WriteInt16u(0xF083);
+            h.WriteByte(0x00);
+            h.WriteInt16u(0x25FF)
+            references.append([f, f.count(), 4, "OFFSETS", inverseDestination[0], inverseDestination[1]])
+            h.WriteInt32u(0xDEADBEEF)
+            if offsets[inverseDestination[0]][inverseDestination[1]] == False:
+                q.append(inverseDestination)
+        # push
         if guidance == 160:
             h.WriteByte(0x68)
             h.WriteInt32u(regular)
@@ -548,24 +637,11 @@ def GenerateCode(q, h, f):
         bend = bend // 32
 
         if destination == None:
-            if bend == 0:
-                destination = (y + 1, x)
-            if bend == 1:
-                destination = (y + 1, x - 1)
-            if bend == 2:
-                destination = (y, x - 1)
-            if bend == 3:
-                destination = (y - 1, x - 1)
-            if bend == 4:
-                destination = (y - 1, x)
-            if bend == 5:
-                destination = (y - 1, x + 1)
-            if bend == 6:
-                destination = (y, x + 1)
-            if bend == 7:
-                destination = (y + 1, x + 1)
+            destination = CalculateDestination(x, y, bend)
             if offsets[destination[0]][destination[1]] == False:
                 q.append(destination)
+            else:
+                print("Don't compute",destination)
         # generate jump to destination
         print("Generating for",regular,guidance,bend)
         h.WriteInt16u(0x25FF)
@@ -573,18 +649,12 @@ def GenerateCode(q, h, f):
         h.WriteInt32u(0xDEADBEEF)
 GenerateCode(positionQueue, helper3, code)
 
-helper3.WriteByte(0xE8)
-helper3.WriteInt32s(11)
-helper3.WriteByte(0xFF)
-helper3.WriteByte(0x25)
-helper3.WriteInt32s(kernel32ThunkChainRVA + 0x00400000)
-
 chunkStart = code.count()
 helper3.WriteByte(0xE8)
 helper3.WriteInt32s(11)
 helper3.WriteByte(0xFF)
 helper3.WriteByte(0x25)
-helper3.WriteInt32s(nnxlxdmmThunkChainRVA + 4 + 0x400000)
+helper3.WriteInt32s(nnxlxdmmThunkChainRVA + 4 + fileBase)
 
 helper3.WriteByte(0x6A)
 helper3.WriteByte(0x6E)
@@ -595,27 +665,19 @@ helper3.WriteByte(0xE8)
 helper3.WriteInt32s(11)
 helper3.WriteByte(0xFF)
 helper3.WriteByte(0x25)
-helper3.WriteInt32s(nnxlxdmmThunkChainRVA + 0x400000)
+helper3.WriteInt32s(nnxlxdmmThunkChainRVA + fileBase)
 
 helper3.WriteByte(0xEB)
 helper3.WriteByte(0xFE)
 
+data = PseudoFile()
+helper2 = FileHelper(data)
 
-# ResolveReferences(code, data, imports)
-for reference in references:
-    fixFile = reference[0]
-    length = reference[2]
-    type = reference[3]
+for y in range(0, len(pixelData)):
+    for x in range(0, len(pixelData[0])):
+        if(offsets[y][x] == False):
+            offsets[y][x] = trueCodeStart
+        references.append([data, data.count(), 4, "CODE", offsets[y][x]])
+        helper2.WriteInt32u(0xDEADBEEF)
 
-    if type.__eq__("OFFSETS"):
-        replace = (reference[4] * len(pixelData[0]) + reference[5]) * 4
-        print("GOTO",reference[4],reference[5],len(pixelData[0]),replace)
-        replaceOffset = reference[1]
-        mask = 0xFF
-        for i in range(0,length):
-            fixFile.data[replaceOffset + i] = (replace & mask) >> (i*8)
-            mask = mask << 8
-    else:
-        print(type)
-
-file.GenerateExecutableFile(code.data, data.data, imports.data, importTable, importTableEnd - importTable - 1)
+file.GenerateExecutableFile(code.data, data.data, imports.data, importTable, importTableEnd - importTable - 1, references)
